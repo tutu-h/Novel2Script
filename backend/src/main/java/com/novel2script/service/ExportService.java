@@ -261,7 +261,7 @@ public class ExportService {
         html.append("<title>").append(escapeHtml(title)).append("</title>\n");
 
         // CSS styling for screenplay-like formatting
-        html.append("<style>\n").append(getScreenplayCss()).append("</style>\n");
+        html.append("<style>\n").append(getScreenplayCSS()).append("</style>\n");
         html.append("</head>\n<body>\n");
         html.append("<div class=\"screenplay\">\n");
 

@@ -3,6 +3,7 @@ package com.novel2script.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.novel2script.config.DeepSeekConfig;
+import com.novel2script.entity.AiModelConfig;
 import com.novel2script.exception.GlobalExceptionHandler.DeepSeekApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +20,7 @@ public class DeepSeekService {
 
     private final RestClient deepSeekRestClient;
     private final DeepSeekConfig deepSeekConfig;
+    private final AiModelService aiModelService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final int MAX_RETRIES = 2;
@@ -163,13 +165,21 @@ public class DeepSeekService {
     }
 
     /**
-     * Call the DeepSeek chat completion API.
+     * Call the active AI model's chat completion API.
      */
     @SuppressWarnings("unchecked")
     private String callDeepSeek(String systemPrompt, String userPrompt) {
         try {
+            // Get active model config
+            AiModelConfig activeModel = aiModelService.getActiveModel();
+            String baseUrl = activeModel.getBaseUrl();
+            String model = activeModel.getModelName();
+            String apiKey = activeModel.getApiKey();
+
+            log.debug("使用模型: provider={}, model={}, baseUrl={}", activeModel.getProvider(), model, baseUrl);
+
             Map<String, Object> requestBody = new LinkedHashMap<>();
-            requestBody.put("model", deepSeekConfig.getModel() != null ? deepSeekConfig.getModel() : "deepseek-chat");
+            requestBody.put("model", model);
             requestBody.put("temperature", deepSeekConfig.getTemperature() > 0 ? deepSeekConfig.getTemperature() : 0.7);
             requestBody.put("max_tokens", deepSeekConfig.getMaxTokens() > 0 ? deepSeekConfig.getMaxTokens() : 8192);
 
@@ -179,46 +189,53 @@ public class DeepSeekService {
             requestBody.put("messages", messages);
 
             String jsonBody = objectMapper.writeValueAsString(requestBody);
-            log.debug("DeepSeek API 请求: model={}, messages数={}", requestBody.get("model"), messages.size());
+            log.debug("API 请求: model={}, messages数={}", model, messages.size());
 
-            Map<String, Object> response = deepSeekRestClient.post()
+            // Build dynamic RestClient for the active model
+            RestClient client = RestClient.builder()
+                    .baseUrl(baseUrl)
+                    .defaultHeader("Authorization", "Bearer " + apiKey)
+                    .defaultHeader("Content-Type", "application/json")
+                    .build();
+
+            Map<String, Object> response = client.post()
                     .uri("/chat/completions")
                     .body(jsonBody)
                     .retrieve()
                     .body(Map.class);
 
             if (response == null) {
-                throw new DeepSeekApiException("DeepSeek API 返回空响应");
+                throw new DeepSeekApiException("AI API 返回空响应");
             }
 
             List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
             if (choices == null || choices.isEmpty()) {
-                throw new DeepSeekApiException("DeepSeek API 未返回有效结果");
+                throw new DeepSeekApiException("AI API 未返回有效结果");
             }
 
             Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
             if (message == null) {
-                throw new DeepSeekApiException("DeepSeek API 响应中缺少 message 字段");
+                throw new DeepSeekApiException("AI API 响应中缺少 message 字段");
             }
 
             String content = (String) message.get("content");
-            log.debug("DeepSeek API 响应长度: {}", content != null ? content.length() : 0);
+            log.debug("AI API 响应长度: {}", content != null ? content.length() : 0);
 
             return content;
 
         } catch (DeepSeekApiException e) {
             throw e;
         } catch (RestClientException e) {
-            log.error("DeepSeek API 调用失败: {}", e.getMessage());
-            throw new DeepSeekApiException("DeepSeek API 调用失败: " + e.getMessage(), e);
+            log.error("AI API 调用失败: {}", e.getMessage());
+            throw new DeepSeekApiException("AI API 调用失败: " + e.getMessage(), e);
         } catch (Exception e) {
-            log.error("处理 DeepSeek API 响应时出错: {}", e.getMessage());
+            log.error("处理 AI API 响应时出错: {}", e.getMessage());
             throw new DeepSeekApiException("处理 API 响应失败: " + e.getMessage(), e);
         }
     }
 
     /**
-     * Call DeepSeek with retry logic.
+     * Call AI model with retry logic.
      */
     private String callDeepSeekWithRetry(String systemPrompt, String userPrompt, int maxRetries) {
         Exception lastException = null;
@@ -231,7 +248,7 @@ public class DeepSeekService {
                 return response;
             } catch (Exception e) {
                 lastException = e;
-                log.warn("DeepSeek API 调用第 {} 次尝试失败: {}", attempt + 1, e.getMessage());
+                log.warn("AI API 调用第 {} 次尝试失败: {}", attempt + 1, e.getMessage());
                 if (attempt < maxRetries) {
                     try {
                         Thread.sleep(1000L * (attempt + 1));
@@ -242,7 +259,7 @@ public class DeepSeekService {
                 }
             }
         }
-        throw new DeepSeekApiException("DeepSeek API 调用在 " + (maxRetries + 1) + " 次尝试后仍然失败: "
+        throw new DeepSeekApiException("AI API 调用在 " + (maxRetries + 1) + " 次尝试后仍然失败: "
                 + (lastException != null ? lastException.getMessage() : "未知错误"));
     }
 

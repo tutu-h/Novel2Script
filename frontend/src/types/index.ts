@@ -112,3 +112,30 @@ export interface ExportRequest {
   scriptId: number;
   format: 'yaml' | 'markdown' | 'pdf';
 }
+
+// AI Model Config
+export interface AiModelConfig {
+  id: number;
+  provider: string;
+  modelName: string;
+  baseUrl: string;
+  enabled: boolean;
+  active: boolean;
+  lastTestStatus: string | null;
+  lastTestAt: string | null;
+  createdAt: string;
+  apiKeyMasked: string;
+}
+
+export interface AiModelConfigRequest {
+  provider: string;
+  modelName: string;
+  apiKey: string;
+  baseUrl?: string;
+}
+
+export interface ProviderOption {
+  value: string;
+  label: string;
+  defaultUrl: string;
+}
