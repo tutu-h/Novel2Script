@@ -1,0 +1,123 @@
+# YAML Schema for Novel2Script screenplay format
+type: object
+required:
+  - script
+properties:
+  script:
+    type: object
+    required:
+      - metadata
+      - acts
+    properties:
+      metadata:
+        type: object
+        required:
+          - title
+        properties:
+          title:
+            type: string
+          author:
+            type: string
+          source_chapters:
+            type: array
+            items:
+              type: integer
+
+      characters:
+        type: array
+        items:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+            description:
+              type: string
+            role_type:
+              type: string
+
+      locations:
+        type: array
+        items:
+          type: object
+          required:
+            - name
+          properties:
+            name:
+              type: string
+            description:
+              type: string
+
+      acts:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          required:
+            - act_id
+            - scenes
+          properties:
+            act_id:
+              type: integer
+            title:
+              type: string
+            scenes:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required:
+                  - scene_id
+                  - setting
+                  - beats
+                properties:
+                  scene_id:
+                    type: integer
+                  setting:
+                    type: string
+                  characters:
+                    type: array
+                    items:
+                      type: string
+                  mood:
+                    type: string
+                  transition:
+                    type: string
+                  beats:
+                    type: array
+                    minItems: 1
+                    items:
+                      type: object
+                      required:
+                        - beat_id
+                      properties:
+                        beat_id:
+                          type: integer
+                        description:
+                          type: string
+                        dialogues:
+                          type: array
+                          items:
+                            type: object
+                            required:
+                              - speaker
+                              - text
+                            properties:
+                              speaker:
+                                type: string
+                              text:
+                                type: string
+                        stage_directions:
+                          type: array
+                          items:
+                            type: string
+                        source_mapping:
+                          type: object
+                          properties:
+                            source_chapter:
+                              type: integer
+                            source_range:
+                              type: string
+                            confidence:
+                              type: string
