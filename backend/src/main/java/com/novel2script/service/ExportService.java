@@ -1,5 +1,6 @@
 package com.novel2script.service;
 
+import com.openhtmltopdf.outputdevice.helper.BaseRendererBuilder;
 import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +9,7 @@ import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
@@ -95,6 +97,22 @@ public class ExportService {
                 if (!roleType.isBlank()) {
                     md.append(" (").append(roleType).append(")");
                 }
+                if (!desc.isBlank()) {
+                    md.append(": ").append(desc);
+                }
+                md.append("\n");
+            }
+            md.append("\n");
+        }
+
+        // Locations / 场景地点
+        List<Map<String, Object>> locations = getListField(scriptNode, "locations");
+        if (locations != null && !locations.isEmpty()) {
+            md.append("## 场景地点\n\n");
+            for (Map<String, Object> location : locations) {
+                String name = getStringField(location, "name", "未知");
+                String desc = getStringField(location, "description", "");
+                md.append("- **").append(name).append("**");
                 if (!desc.isBlank()) {
                     md.append(": ").append(desc);
                 }
@@ -210,17 +228,63 @@ public class ExportService {
             builder.useFastMode();
             builder.withHtmlContent(html, null);
             builder.toStream(os);
+
+            // Register Chinese fonts for proper CJK rendering
+            registerChineseFonts(builder);
+
             builder.run();
 
             byte[] pdfBytes = os.toByteArray();
-            log.debug("PDF 生成成功，大小: {} bytes", pdfBytes.length);
+            log.info("PDF 生成成功，大小: {} bytes", pdfBytes.length);
             return pdfBytes;
         } catch (Exception e) {
-            log.warn("PDF 生成失败，回退到 HTML 格式: {}", e.getMessage());
+            log.warn("PDF 生成失败，回退到 HTML 格式: {}", e.getMessage(), e);
         }
 
-        // Fallback: return HTML bytes
+        // Fallback: return HTML bytes with correct content type hint
         return html.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Register common Chinese fonts from the system for PDF rendering.
+     */
+    private void registerChineseFonts(PdfRendererBuilder builder) {
+        // Common Chinese font paths on Windows, macOS, and Linux
+        String[][] fontCandidates = {
+                // Windows fonts
+                {"SimHei", "C:/Windows/Fonts/simhei.ttf"},
+                {"SimSun", "C:/Windows/Fonts/simsun.ttc"},
+                {"SimFang", "C:/Windows/Fonts/simfang.ttf"},
+                {"SimKai", "C:/Windows/Fonts/simkai.ttf"},
+                {"MicrosoftYaHei", "C:/Windows/Fonts/msyh.ttc"},
+                // macOS fonts
+                {"PingFangSC", "/System/Library/Fonts/PingFang.ttc"},
+                {"STSong", "/System/Library/Fonts/Supplemental/Songti.ttc"},
+                // Linux fonts
+                {"NotoSansCJK", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"},
+                {"NotoSerifCJK", "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"},
+                {"WenQuanYi", "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc"},
+        };
+
+        boolean registered = false;
+        for (String[] fontInfo : fontCandidates) {
+            String fontName = fontInfo[0];
+            String fontPath = fontInfo[1];
+            File fontFile = new File(fontPath);
+            if (fontFile.exists() && fontFile.canRead()) {
+                try {
+                    builder.useFont(fontFile, fontName, 400, BaseRendererBuilder.FontStyle.NORMAL, true);
+                    log.debug("注册中文字体: {} ({})", fontName, fontPath);
+                    registered = true;
+                } catch (Exception e) {
+                    log.debug("注册字体失败 {} ({}): {}", fontName, fontPath, e.getMessage());
+                }
+            }
+        }
+
+        if (!registered) {
+            log.warn("未找到可用的中文字体，PDF中的中文可能无法正常显示");
+        }
     }
 
     /**
@@ -251,9 +315,10 @@ public class ExportService {
         }
 
         StringBuilder html = new StringBuilder();
+        html.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         html.append("<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n");
-        html.append("<meta charset=\"UTF-8\">\n");
-        html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+        html.append("<meta charset=\"UTF-8\" />\n");
+        html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />\n");
 
         // Title in <head>
         Map<String, Object> metadata = getMapField(scriptNode, "metadata");
@@ -291,7 +356,25 @@ public class ExportService {
                     html.append(" <span class=\"role-type\">(").append(escapeHtml(roleType)).append(")</span>");
                 }
                 if (!desc.isBlank()) {
-                    html.append("<br><span class=\"char-desc\">").append(escapeHtml(desc)).append("</span>");
+                    html.append("<br /><span class=\"char-desc\">").append(escapeHtml(desc)).append("</span>");
+                }
+                html.append("</li>\n");
+            }
+            html.append("</ul>\n</div>\n");
+        }
+
+        // Locations / 场景地点
+        List<Map<String, Object>> locations = getListField(scriptNode, "locations");
+        if (locations != null && !locations.isEmpty()) {
+            html.append("<div class=\"locations\">\n");
+            html.append("<h2>场景地点</h2>\n");
+            html.append("<ul>\n");
+            for (Map<String, Object> location : locations) {
+                String name = getStringField(location, "name", "未知");
+                String desc = getStringField(location, "description", "");
+                html.append("<li><strong>").append(escapeHtml(name)).append("</strong>");
+                if (!desc.isBlank()) {
+                    html.append("<br /><span class=\"loc-desc\">").append(escapeHtml(desc)).append("</span>");
                 }
                 html.append("</li>\n");
             }
@@ -465,15 +548,16 @@ public class ExportService {
     }
 
     private String buildEmptyHtml(String message) {
-        return "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n" +
-                "<meta charset=\"UTF-8\">\n<title>剧本导出</title>\n</head>\n<body>\n" +
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+                "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n" +
+                "<meta charset=\"UTF-8\" />\n<title>剧本导出</title>\n</head>\n<body>\n" +
                 "<h1>" + escapeHtml(message) + "</h1>\n</body>\n</html>";
     }
 
     private String getScreenplayCSS() {
         return """
                 body {
-                    font-family: "SimSun", "Songti SC", "Noto Serif CJK SC", serif;
+                    font-family: "SimHei", "SimSun", "MicrosoftYaHei", "PingFangSC", "NotoSansCJK", "Songti SC", "Noto Serif CJK SC", sans-serif;
                     background: #f5f5f0;
                     margin: 0;
                     padding: 20px;
@@ -524,6 +608,28 @@ public class ExportService {
                     font-size: 0.9em;
                 }
                 .char-desc {
+                    color: #666;
+                    font-size: 0.9em;
+                }
+                .locations {
+                    margin-bottom: 40px;
+                    padding: 20px;
+                    background: #faf8f0;
+                    border-left: 4px solid #b08d57;
+                }
+                .locations h2 {
+                    margin-top: 0;
+                    font-size: 1.4em;
+                }
+                .locations ul {
+                    list-style: none;
+                    padding: 0;
+                }
+                .locations li {
+                    margin: 10px 0;
+                    line-height: 1.6;
+                }
+                .loc-desc {
                     color: #666;
                     font-size: 0.9em;
                 }

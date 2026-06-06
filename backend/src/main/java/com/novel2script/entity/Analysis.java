@@ -33,6 +33,12 @@ public class Analysis {
     @Column(columnDefinition = "CLOB")
     private String chapterSummariesJson = "[]";
 
+    @Column(columnDefinition = "CLOB")
+    private String analyzedChaptersJson = "[]";
+
+    @Column(columnDefinition = "CLOB")
+    private String perChapterAnalysisJson = "[]";
+
     private LocalDateTime createdAt;
 
     @PrePersist

@@ -33,12 +33,14 @@ interface Scene {
   beats?: Beat[];
   mood?: string;
   transition?: string;
+  source_chapter?: number;
 }
 
 interface Act {
   act_id: number;
   title?: string;
   scenes?: Scene[];
+  source_chapters?: number[];
 }
 
 interface Character {
@@ -206,6 +208,11 @@ function SceneBlock({ scene, index }: { scene: Scene; index: number }) {
         {scene.mood && (
           <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full">{scene.mood}</span>
         )}
+        {scene.source_chapter && (
+          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+            第{scene.source_chapter}章
+          </span>
+        )}
       </div>
 
       {!collapsed && (
@@ -260,6 +267,11 @@ function ActBlock({ act, index }: { act: Act; index: number }) {
           第 {act.act_id ?? index + 1} 幕
           {act.title && <span className="ml-2 font-normal text-gray-500 text-base">- {act.title}</span>}
         </h3>
+        {act.source_chapters && act.source_chapters.length > 0 && (
+          <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+            第{act.source_chapters.join(',')}章
+          </span>
+        )}
       </div>
 
       {!collapsed && (
@@ -386,9 +398,16 @@ export default function ScriptViewer({ contentYaml }: ScriptViewerProps) {
         </div>
       )}
 
-      {/* Characters & Locations */}
-      {script.characters && <CharactersPanel characters={script.characters} />}
-      {script.locations && <LocationsPanel locations={script.locations} />}
+      {/* Text Analysis for this script */}
+      {(script.characters?.length || script.locations?.length) && (
+        <div className="mb-6 pb-4 border-b border-gray-200">
+          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+            文本分析
+          </h3>
+          {script.characters && script.characters.length > 0 && <CharactersPanel characters={script.characters} />}
+          {script.locations && script.locations.length > 0 && <LocationsPanel locations={script.locations} />}
+        </div>
+      )}
 
       {/* Acts */}
       {hasContent ? (

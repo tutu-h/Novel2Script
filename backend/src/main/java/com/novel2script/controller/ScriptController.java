@@ -47,6 +47,25 @@ public class ScriptController {
         return scriptGeneratorService.generateScript(projectId);
     }
 
+    @PostMapping("/generate-incremental")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ScriptResponse generateIncremental(@RequestBody Map<String, Object> body) {
+        Long projectId = body.get("projectId") != null ? Long.valueOf(body.get("projectId").toString()) : null;
+        if (projectId == null) {
+            throw new BadRequestException("projectId 不能为空");
+        }
+        @SuppressWarnings("unchecked")
+        List<Number> rawNumbers = (List<Number>) body.get("chapterNumbers");
+        if (rawNumbers == null || rawNumbers.isEmpty()) {
+            throw new BadRequestException("chapterNumbers 不能为空");
+        }
+        List<Integer> chapterNumbers = rawNumbers.stream()
+                .map(Number::intValue)
+                .collect(java.util.stream.Collectors.toList());
+        log.info("增量生成剧本，项目ID: {}, 章节: {}", projectId, chapterNumbers);
+        return scriptGeneratorService.generateIncremental(projectId, chapterNumbers);
+    }
+
     @GetMapping("/project/{projectId}")
     public List<ScriptResponse> listScriptsByProject(@PathVariable Long projectId) {
         log.debug("获取项目 {} 的剧本列表", projectId);
@@ -148,6 +167,8 @@ public class ScriptController {
         List<Map<String, Object>> locations = parseJsonArray(analysis.getLocationsJson());
         List<Map<String, Object>> events = parseJsonArray(analysis.getEventsJson());
         List<Map<String, Object>> chapterSummaries = parseJsonArray(analysis.getChapterSummariesJson());
+        List<Map<String, Object>> perChapterAnalysis = parseJsonArray(analysis.getPerChapterAnalysisJson());
+        List<Integer> analyzedChapters = parseIntArray(analysis.getAnalyzedChaptersJson());
 
         return AnalysisResponse.builder()
                 .id(analysis.getId())
@@ -156,6 +177,8 @@ public class ScriptController {
                 .locations(locations)
                 .events(events)
                 .chapterSummaries(chapterSummaries)
+                .perChapterAnalysis(perChapterAnalysis)
+                .analyzedChapters(analyzedChapters)
                 .createdAt(analysis.getCreatedAt())
                 .build();
     }
@@ -169,6 +192,19 @@ public class ScriptController {
                     new TypeReference<List<Map<String, Object>>>() {});
         } catch (Exception e) {
             log.warn("解析JSON数组失败: {}", e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+
+    private List<Integer> parseIntArray(String json) {
+        if (json == null || json.isBlank()) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(json,
+                    new TypeReference<List<Integer>>() {});
+        } catch (Exception e) {
+            log.warn("解析整数数组失败: {}", e.getMessage());
             return Collections.emptyList();
         }
     }

@@ -6,6 +6,11 @@ export async function generateScript(data: GenerateScriptRequest): Promise<Scrip
   return response.data;
 }
 
+export async function generateIncremental(data: GenerateScriptRequest): Promise<Script> {
+  const response = await api.post<Script>('/scripts/generate-incremental', data);
+  return response.data;
+}
+
 export async function getProjectScripts(projectId: number): Promise<Script[]> {
   const response = await api.get<Script[]>(`/scripts/project/${projectId}`);
   return response.data;
@@ -34,4 +39,16 @@ export async function fixScript(id: number): Promise<Script> {
 export async function getAnalysis(projectId: number): Promise<Analysis> {
   const response = await api.get<Analysis>(`/scripts/project/${projectId}/analysis`);
   return response.data;
+}
+
+export async function deleteScript(id: number): Promise<void> {
+  try {
+    await api.delete(`/scripts/${id}`);
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      // Log detailed info for debugging
+      console.error('[deleteScript] Error:', error.message, 'Status:', (error as any).response?.status);
+    }
+    throw error;
+  }
 }

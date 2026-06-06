@@ -182,7 +182,7 @@ export default function ScriptPage() {
       )}
 
       {/* Header & Toolbar */}
-      <div className="card mb-4 flex-shrink-0">
+      <div className="card mb-4 flex-shrink-0 overflow-visible">
         <div className="p-4">
           <div className="flex items-center justify-between">
             <div>

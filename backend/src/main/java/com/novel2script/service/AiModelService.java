@@ -1,7 +1,6 @@
 package com.novel2script.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.novel2script.config.DeepSeekConfig;
 import com.novel2script.dto.AiModelConfigRequest;
 import com.novel2script.dto.AiModelConfigResponse;
 import com.novel2script.entity.AiModelConfig;
@@ -23,7 +22,6 @@ import java.util.*;
 public class AiModelService {
 
     private final AiModelConfigRepository repository;
-    private final DeepSeekConfig deepSeekConfig;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final Map<String, String> DEFAULT_BASE_URLS = Map.of(
@@ -156,24 +154,12 @@ public class AiModelService {
     }
 
     /**
-     * Get the active model config. Falls back to default DeepSeek config if none is active.
+     * Get the active model config. Throws an error if no model is configured.
      */
     public AiModelConfig getActiveModel() {
-        Optional<AiModelConfig> activeModel = repository.findByActiveTrue();
-        if (activeModel.isPresent()) {
-            return activeModel.get();
-        }
-
-        // Fallback to default DeepSeek configuration from application properties
-        log.info("未找到活跃模型，使用默认 DeepSeek 配置");
-        return AiModelConfig.builder()
-                .provider("deepseek")
-                .modelName(deepSeekConfig.getModel() != null ? deepSeekConfig.getModel() : "deepseek-chat")
-                .apiKey(deepSeekConfig.getApiKey())
-                .baseUrl(deepSeekConfig.getBaseUrl() != null ? deepSeekConfig.getBaseUrl() : "https://api.deepseek.com")
-                .enabled(true)
-                .active(true)
-                .build();
+        return repository.findByActiveTrue()
+                .orElseThrow(() -> new BadRequestException(
+                        "尚未配置 AI 模型，请先在右上角「AI 模型配置」中添加并启用一个模型"));
     }
 
     // ---- Private helpers ----

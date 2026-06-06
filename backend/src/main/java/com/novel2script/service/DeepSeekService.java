@@ -2,7 +2,7 @@ package com.novel2script.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.novel2script.config.DeepSeekConfig;
+import com.novel2script.config.LlmConfig;
 import com.novel2script.entity.AiModelConfig;
 import com.novel2script.exception.GlobalExceptionHandler.DeepSeekApiException;
 import lombok.RequiredArgsConstructor;
@@ -18,8 +18,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class DeepSeekService {
 
-    private final RestClient deepSeekRestClient;
-    private final DeepSeekConfig deepSeekConfig;
+    private final LlmConfig llmConfig;
     private final AiModelService aiModelService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -73,7 +72,7 @@ public class DeepSeekService {
 
         String userPrompt = "请分析以下小说文本中的所有场景和地点：\n\n" + truncateText(allChaptersText, 8000);
 
-        String response = callDeepSeek(systemPrompt, userPrompt);
+        String response = callDeepSeekWithRetry(systemPrompt, userPrompt, MAX_RETRIES);
         return parseJsonArray(response, "地点");
     }
 
@@ -93,7 +92,7 @@ public class DeepSeekService {
 
         String userPrompt = "请分析第" + chapterNumber + "章中的关键事件：\n\n" + truncateText(chapterText, 6000);
 
-        String response = callDeepSeek(systemPrompt, userPrompt);
+        String response = callDeepSeekWithRetry(systemPrompt, userPrompt, MAX_RETRIES);
         return parseJsonArray(response, "事件");
     }
 
@@ -180,8 +179,8 @@ public class DeepSeekService {
 
             Map<String, Object> requestBody = new LinkedHashMap<>();
             requestBody.put("model", model);
-            requestBody.put("temperature", deepSeekConfig.getTemperature() > 0 ? deepSeekConfig.getTemperature() : 0.7);
-            requestBody.put("max_tokens", deepSeekConfig.getMaxTokens() > 0 ? deepSeekConfig.getMaxTokens() : 8192);
+            requestBody.put("temperature", llmConfig.getTemperature() > 0 ? llmConfig.getTemperature() : 0.7);
+            requestBody.put("max_tokens", llmConfig.getMaxTokens() > 0 ? llmConfig.getMaxTokens() : 8192);
 
             List<Map<String, String>> messages = new ArrayList<>();
             messages.add(Map.of("role", "system", "content", systemPrompt));
@@ -265,16 +264,74 @@ public class DeepSeekService {
 
     /**
      * Parse a JSON array string from the model response.
+     * Applies multiple cleaning strategies to handle malformed AI output.
      */
     private List<Map<String, Object>> parseJsonArray(String response, String entityName) {
+        String cleaned = cleanJsonResponse(response);
         try {
-            String cleaned = stripCodeFences(response);
             return objectMapper.readValue(cleaned, new TypeReference<List<Map<String, Object>>>() {});
         } catch (Exception e) {
-            log.error("解析{}JSON失败，原始响应: {}", entityName, truncateText(response, 500));
-            log.error("解析异常: {}", e.getMessage());
-            throw new DeepSeekApiException("解析" + entityName + "数据失败: " + e.getMessage(), e);
+            log.warn("首次解析{}JSON失败，尝试修复: {}", entityName, e.getMessage());
+            // Try more aggressive cleaning
+            String repaired = repairJson(cleaned);
+            try {
+                return objectMapper.readValue(repaired, new TypeReference<List<Map<String, Object>>>() {});
+            } catch (Exception e2) {
+                log.error("解析{}JSON失败（修复后仍然失败），原始响应: {}", entityName, truncateText(response, 500));
+                log.error("修复后响应: {}", truncateText(repaired, 500));
+                log.error("解析异常: {}", e2.getMessage());
+                throw new DeepSeekApiException("解析" + entityName + "数据失败: " + e.getMessage(), e);
+            }
         }
+    }
+
+    /**
+     * Clean AI response to extract valid JSON.
+     * Handles code fences, explanatory text, and common formatting issues.
+     */
+    private String cleanJsonResponse(String text) {
+        if (text == null) return "[]";
+        String cleaned = text.trim();
+
+        // Remove code fences (start and end, also anywhere in the middle)
+        cleaned = cleaned.replaceAll("```(?:json|JSON|yaml|YAML)?\\s*", "");
+        cleaned = cleaned.replaceAll("```", "");
+        cleaned = cleaned.trim();
+
+        // Find the first [ and last ] to extract the JSON array
+        int firstBracket = cleaned.indexOf('[');
+        int lastBracket = cleaned.lastIndexOf(']');
+        if (firstBracket >= 0 && lastBracket > firstBracket) {
+            cleaned = cleaned.substring(firstBracket, lastBracket + 1);
+        }
+
+        // Remove trailing commas before } or ]
+        cleaned = cleaned.replaceAll(",\\s*}", "}");
+        cleaned = cleaned.replaceAll(",\\s*]", "]");
+
+        return cleaned.trim();
+    }
+
+    /**
+     * Attempt to repair common JSON errors from AI models.
+     * Fixes: unescaped newlines in strings, missing quotes, etc.
+     */
+    private String repairJson(String json) {
+        if (json == null || json.isBlank()) return "[]";
+        String repaired = json;
+
+        // Replace literal newlines/tab characters that break JSON strings
+        // (only safe outside of properly quoted strings, but as a best-effort fix)
+        repaired = repaired.replace("\n", " ").replace("\r", " ").replace("\t", " ");
+
+        // Fix double commas
+        repaired = repaired.replaceAll(",\\s*,", ",");
+
+        // Remove trailing commas (again, after other fixes)
+        repaired = repaired.replaceAll(",\\s*}", "}");
+        repaired = repaired.replaceAll(",\\s*]", "]");
+
+        return repaired.trim();
     }
 
     /**

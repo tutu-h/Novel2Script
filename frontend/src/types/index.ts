@@ -27,6 +27,8 @@ export interface Analysis {
   locations: AnalysisLocation[];
   events: AnalysisEvent[];
   chapterSummaries: ChapterSummary[];
+  perChapterAnalysis: PerChapterAnalysis[];
+  analyzedChapters: number[];
   createdAt: string;
 }
 
@@ -48,7 +50,14 @@ export interface AnalysisEvent {
 }
 
 export interface ChapterSummary {
-  chapterNumber: number;
+  chapter: number;
+  summary: string;
+}
+
+export interface PerChapterAnalysis {
+  chapter: number;
+  newCharacters: AnalysisCharacter[];
+  newLocations: AnalysisLocation[];
   summary: string;
 }
 
@@ -102,6 +111,7 @@ export interface BatchAddChaptersRequest {
 
 export interface GenerateScriptRequest {
   projectId: number;
+  chapterNumbers?: number[];
 }
 
 export interface UpdateScriptRequest {

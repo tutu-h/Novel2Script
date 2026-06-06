@@ -4,6 +4,7 @@ import type { Project, Chapter, Analysis, AddChapterRequest } from '../types';
 import * as projectService from '../services/projectService';
 import * as scriptService from '../services/scriptService';
 import ChapterList from '../components/ChapterList';
+import ChapterSelectModal from '../components/ChapterSelectModal';
 
 type Tab = 'chapters' | 'analysis' | 'scripts';
 
@@ -35,6 +36,9 @@ export default function ProjectPage() {
 
   // Script generation state
   const [generating, setGenerating] = useState(false);
+  const [showChapterSelect, setShowChapterSelect] = useState(false);
+  const [deletingScript, setDeletingScript] = useState<number | null>(null);
+  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
 
   const fetchProject = useCallback(async () => {
     try {
@@ -147,10 +151,19 @@ export default function ProjectPage() {
   };
 
   const handleGenerateScript = async () => {
+    // Show chapter selection modal instead of generating directly
+    setShowChapterSelect(true);
+  };
+
+  const handleIncrementalGenerate = async (selectedChapterNumbers: number[]) => {
     setGenerating(true);
     setError(null);
+    setShowChapterSelect(false);
     try {
-      const result = await scriptService.generateScript({ projectId });
+      const result = await scriptService.generateIncremental({
+        projectId,
+        chapterNumbers: selectedChapterNumbers,
+      });
       await fetchScripts();
       await fetchAnalysis();
       navigate(`/project/${projectId}/script/${result.id}`);
@@ -158,6 +171,20 @@ export default function ProjectPage() {
       setError(err instanceof Error ? err.message : '生成剧本失败');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleDeleteScript = async (scriptId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('确定要删除这个剧本吗？')) return;
+    setDeletingScript(scriptId);
+    try {
+      await scriptService.deleteScript(scriptId);
+      await fetchScripts();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除剧本失败');
+    } finally {
+      setDeletingScript(null);
     }
   };
 
@@ -169,6 +196,12 @@ export default function ProjectPage() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const extractChapterBadge = (title?: string) => {
+    if (!title) return '';
+    const match = title.match(/章节(.+)/);
+    return match ? match[1] : '';
   };
 
   if (loading) {
@@ -199,7 +232,7 @@ export default function ProjectPage() {
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'chapters', label: '章节管理' },
-    { key: 'analysis', label: '文本分析' },
+    { key: 'analysis', label: '小说整体分析' },
     { key: 'scripts', label: '剧本版本' },
   ];
 
@@ -424,7 +457,7 @@ export default function ProjectPage() {
       {activeTab === 'analysis' && (
         <div>
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">文本分析</h2>
+            <h2 className="text-lg font-semibold text-gray-900">小说整体分析</h2>
             <button
               onClick={handleGenerateScript}
               disabled={generating || chapters.length === 0}
@@ -466,109 +499,180 @@ export default function ProjectPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
               </svg>
               <p>尚未进行文本分析</p>
-              <p className="text-sm mt-1">点击"开始分析"按钮，AI 将分析小说内容并提取角色、场景和事件</p>
+              <p className="text-sm mt-1">点击"开始分析"按钮，AI 将分析小说内容并提取角色、场景和章节摘要</p>
             </div>
           )}
 
           {!generating && analysis && (
             <div className="space-y-4">
-              {/* Characters */}
-              {analysis.characters && analysis.characters.length > 0 && (
-                <div className="card p-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
-                    <svg className="w-4 h-4 mr-1.5 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    角色 ({analysis.characters.length})
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {analysis.characters.map((char, i) => (
-                      <div key={i} className="p-3 bg-gray-50 rounded-lg">
-                        <div className="font-medium text-sm text-gray-900">{char.name}</div>
-                        {char.role && (
-                          <span className="inline-block text-xs bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded mt-1">
-                            {char.role}
+              {/* Per-chapter analysis */}
+              {analysis.perChapterAnalysis && analysis.perChapterAnalysis.length > 0 ? (
+                analysis.perChapterAnalysis.map((chAnalysis) => {
+                  const isExpanded = expandedChapters.has(chAnalysis.chapter);
+                  return (
+                    <div key={chAnalysis.chapter} className="card overflow-hidden">
+                      <button
+                        className="w-full p-4 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                        onClick={() => {
+                          setExpandedChapters((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(chAnalysis.chapter)) {
+                              next.delete(chAnalysis.chapter);
+                            } else {
+                              next.add(chAnalysis.chapter);
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        <div className="flex items-center space-x-3">
+                          <span className="w-8 h-8 bg-purple-50 text-purple-600 rounded-lg flex items-center justify-center text-sm font-bold">
+                            {chAnalysis.chapter}
                           </span>
-                        )}
-                        {char.description && (
-                          <p className="text-xs text-gray-500 mt-1">{char.description}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                          <div>
+                            <h4 className="text-sm font-semibold text-gray-900">第 {chAnalysis.chapter} 章</h4>
+                            <div className="flex items-center space-x-3 mt-0.5">
+                              {chAnalysis.newCharacters && chAnalysis.newCharacters.length > 0 && (
+                                <span className="text-xs text-gray-500">
+                                  {chAnalysis.newCharacters.length} 位新角色
+                                </span>
+                              )}
+                              {chAnalysis.newLocations && chAnalysis.newLocations.length > 0 && (
+                                <span className="text-xs text-gray-500">
+                                  {chAnalysis.newLocations.length} 个新场景
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <svg className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
 
-              {/* Locations */}
-              {analysis.locations && analysis.locations.length > 0 && (
-                <div className="card p-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
-                    <svg className="w-4 h-4 mr-1.5 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                    场景 ({analysis.locations.length})
-                  </h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {analysis.locations.map((loc, i) => (
-                      <div key={i} className="p-3 bg-gray-50 rounded-lg">
-                        <div className="font-medium text-sm text-gray-900">{loc.name}</div>
-                        {loc.description && (
-                          <p className="text-xs text-gray-500 mt-1">{loc.description}</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 border-t border-gray-100">
+                          {/* Summary */}
+                          {chAnalysis.summary && (
+                            <div className="mt-3 mb-3">
+                              <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">摘要</h5>
+                              <p className="text-sm text-gray-700 leading-relaxed">{chAnalysis.summary}</p>
+                            </div>
+                          )}
 
-              {/* Events */}
-              {analysis.events && analysis.events.length > 0 && (
-                <div className="card p-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
-                    <svg className="w-4 h-4 mr-1.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                    </svg>
-                    事件 ({analysis.events.length})
-                  </h3>
-                  <div className="space-y-2">
-                    {analysis.events.map((event, i) => (
-                      <div key={i} className="flex items-start p-3 bg-gray-50 rounded-lg">
-                        <span className="flex-shrink-0 w-6 h-6 bg-green-100 text-green-700 rounded text-xs font-medium flex items-center justify-center mr-2">
-                          {event.chapter}
-                        </span>
-                        <div>
-                          <div className="font-medium text-sm text-gray-900">{event.title}</div>
-                          {event.description && (
-                            <p className="text-xs text-gray-500 mt-0.5">{event.description}</p>
+                          {/* New Characters */}
+                          {chAnalysis.newCharacters && chAnalysis.newCharacters.length > 0 && (
+                            <div className="mt-3">
+                              <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center">
+                                <svg className="w-3.5 h-3.5 mr-1 text-primary-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                新角色
+                              </h5>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {chAnalysis.newCharacters.map((char, i) => (
+                                  <div key={i} className="p-2.5 bg-primary-50 rounded-lg">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-6 h-6 rounded-full bg-primary-100 text-primary-700 flex items-center justify-center text-xs font-bold">
+                                        {char.name.charAt(0)}
+                                      </span>
+                                      <span className="text-sm font-medium text-gray-900">{char.name}</span>
+                                      {char.role && (
+                                        <span className="text-xs bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded">
+                                          {char.role}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {char.description && (
+                                      <p className="text-xs text-gray-500 mt-1 ml-8">{char.description}</p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* New Locations */}
+                          {chAnalysis.newLocations && chAnalysis.newLocations.length > 0 && (
+                            <div className="mt-3">
+                              <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center">
+                                <svg className="w-3.5 h-3.5 mr-1 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                新场景
+                              </h5>
+                              <div className="flex flex-wrap gap-2">
+                                {chAnalysis.newLocations.map((loc, i) => (
+                                  <div key={i} className="px-3 py-2 bg-amber-50 rounded-lg">
+                                    <span className="text-sm font-medium text-gray-900">{loc.name}</span>
+                                    {loc.description && (
+                                      <span className="text-xs text-gray-500 block mt-0.5">{loc.description}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
                           )}
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                /* Fallback: use chapterSummaries to build per-chapter cards */
+                <>
+                  {analysis.chapterSummaries && analysis.chapterSummaries.length > 0 && (
+                    analysis.chapterSummaries.map((summary) => {
+                      const isExpanded = expandedChapters.has(summary.chapter);
+                      return (
+                        <div key={summary.chapter} className="card overflow-hidden">
+                          <button
+                            className="w-full p-4 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                            onClick={() => {
+                              setExpandedChapters((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(summary.chapter)) {
+                                  next.delete(summary.chapter);
+                                } else {
+                                  next.add(summary.chapter);
+                                }
+                                return next;
+                              });
+                            }}
+                          >
+                            <div className="flex items-center space-x-3">
+                              <span className="w-8 h-8 bg-purple-50 text-purple-600 rounded-lg flex items-center justify-center text-sm font-bold">
+                                {summary.chapter}
+                              </span>
+                              <h4 className="text-sm font-semibold text-gray-900">第 {summary.chapter} 章</h4>
+                            </div>
+                            <svg className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
 
-              {/* Chapter Summaries */}
-              {analysis.chapterSummaries && analysis.chapterSummaries.length > 0 && (
-                <div className="card p-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
-                    <svg className="w-4 h-4 mr-1.5 text-purple-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-                    </svg>
-                    章节摘要
-                  </h3>
-                  <div className="space-y-2">
-                    {analysis.chapterSummaries.map((summary, i) => (
-                      <div key={i} className="flex items-start p-3 bg-gray-50 rounded-lg">
-                        <span className="flex-shrink-0 text-xs font-medium text-gray-500 w-12">
-                          第{summary.chapterNumber}章
-                        </span>
-                        <p className="text-sm text-gray-700">{summary.summary}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                          {isExpanded && (
+                            <div className="px-4 pb-4 border-t border-gray-100">
+                              {/* Summary */}
+                              <div className="mt-3">
+                                <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">摘要</h5>
+                                <p className="text-sm text-gray-700 leading-relaxed">{summary.summary}</p>
+                              </div>
+
+                              {/* Placeholder for characters and locations */}
+                              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                                <p className="text-xs text-gray-400 text-center">
+                                  重新生成剧本后，此处将显示本章新出现的角色和场景
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </>
               )}
             </div>
           )}
@@ -637,23 +741,53 @@ export default function ProjectPage() {
                 >
                   <div className="p-4 flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <span className="w-8 h-8 bg-primary-50 text-primary-600 rounded-lg flex items-center justify-center text-sm font-medium">
-                        v{script.version}
+                      <span className="w-8 h-8 bg-primary-50 text-primary-600 rounded-lg flex items-center justify-center text-xs font-medium">
+                        {extractChapterBadge(script.title)}
                       </span>
                       <div>
                         <h4 className="text-sm font-medium text-gray-900">{script.title || `剧本 v${script.version}`}</h4>
                         <p className="text-xs text-gray-500">{formatDate(script.createdAt)}</p>
                       </div>
                     </div>
-                    <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                    </svg>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={(e) => handleDeleteScript(script.id, e)}
+                        disabled={deletingScript === script.id}
+                        className="p-1.5 text-gray-400 hover:text-red-500 transition-colors disabled:opacity-50"
+                        title="删除剧本"
+                      >
+                        {deletingScript === script.id ? (
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        )}
+                      </button>
+                      <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
                   </div>
                 </div>
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {/* Chapter Select Modal */}
+      {showChapterSelect && (
+        <ChapterSelectModal
+          chapters={chapters}
+          analyzedChapters={analysis?.analyzedChapters || []}
+          onConfirm={handleIncrementalGenerate}
+          onCancel={() => setShowChapterSelect(false)}
+          loading={generating}
+        />
       )}
     </div>
   );

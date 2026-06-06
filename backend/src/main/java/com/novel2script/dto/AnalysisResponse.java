@@ -16,5 +16,7 @@ public class AnalysisResponse {
     private List<Map<String, Object>> locations;
     private List<Map<String, Object>> events;
     private List<Map<String, Object>> chapterSummaries;
+    private List<Map<String, Object>> perChapterAnalysis;
+    private List<Integer> analyzedChapters;
     private LocalDateTime createdAt;
 }
